@@ -22,9 +22,23 @@ A PowerShell 7 WinForms toolkit for Microsoft Teams Enterprise Voice. It provisi
 
 ## Requirements
 
-- Windows with **PowerShell 7** (`pwsh`). Windows PowerShell 5.1 is not supported.
-- An Entra app registration (SPN) for the Graph API, with the permissions listed in the operator guide.
-- For RBAC features: the **MicrosoftTeams** module, version **7.8** recommended. Install it with `Install-Module MicrosoftTeams -RequiredVersion 7.8.0`, or point the Configuration popup at a copy.
+**Software**
+
+- Windows with **PowerShell 7** (`pwsh`). Windows PowerShell 5.1 is not supported by this README.
+- For RBAC features: the **MicrosoftTeams** module, version **7.8** recommended. Install it with `Install-Module MicrosoftTeams -RequiredVersion 7.8.0`, or point the Configuration popup at a copy. This is the only module the tool imports.
+- Network access to `login.microsoftonline.com` and `graph.microsoft.com`.
+
+**App registration (SPN), one per tenant**
+
+- Application permissions, with admin consent granted: `User.Read.All`, `TeamsTelephoneNumber.Read.All`, `TeamsTelephoneNumber.ReadWrite.All`, `TeamsUserConfiguration.Read.All`, and `CallRecords.Read.All` for CDR reports.
+- Directory role **Teams Administrator** assigned to the SPN. RBAC needs this role. Without it, cmdlets return empty results rather than errors.
+- One client secret serves both Graph and RBAC. When it expires, both stop working.
+
+**Signed-in user**
+
+- Interactive writes to resource accounts need Teams Administrator, or Teams Telephony Administrator for telephony-only changes. Trusted IP writes need Teams Administrator.
+
+The [operator guide](Docs/TeamsVoiceProvisioning_Instructions.md#10-permissions-reference) has the step-by-step SPN setup, the full permission table, and the troubleshooting notes.
 
 ## Getting started
 
