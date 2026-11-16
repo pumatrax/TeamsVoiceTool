@@ -487,6 +487,62 @@ doesn't exist, so a shared default catalog is possible.
 
 ## 10. Permissions reference
 
+### Setting up the SPN (one per tenant)
+
+1. **Create the app registration.** In the Entra admin center, go to *Entra ID > App registrations >
+   New registration*. Use a name such as `TeamsVoiceTool`, single-tenant, and no redirect URI.
+2. **Create a credential.** Under *Certificates & secrets*, add a client secret and copy the value
+   right away. It is shown once. Note the expiry date, because an expired secret stops both API and
+   RBAC sign-in. The tool never stores the secret.
+3. **Add API permissions.** Under *API permissions > Add a permission > Microsoft Graph >
+   Application permissions*, add the permissions in the table below. Then click
+   **Grant admin consent for <tenant>**. Application permissions do nothing until consent is granted.
+4. **Assign the Teams Administrator directory role to the SPN.** Under *Entra ID > Roles and
+   administrators > Teams Administrator > Add assignments*, select the app registration. This is
+   the RBAC role. Skype for Business Administrator does not work for this.
+5. **Copy the IDs into the Configuration window.** Tenant ID, client ID, and the secret (typed into
+   the SPN Secret box each session).
+6. **Click Test RBAC.** It should report `RBAC OK`. If it reports `ROLE MISSING`, step 4 is not done
+   or has not finished propagating. Wait a few minutes and test again.
+
+| Application permission | Used for | Dependency |
+|---|---|---|
+| `User.Read.All` | User lookups, license details | Needed by most Graph features |
+| `TeamsTelephoneNumber.Read.All` | Listing number assignments, reading DR numbers | Graph number reads |
+| `TeamsTelephoneNumber.ReadWrite.All` | Assigning, unassigning, and updating numbers | Needs the Read permission too |
+| `TeamsPolicyUserAssign.ReadWrite.All` | Assigning and unassigning user policies through Graph | Listed for the beta `teamsPolicyUserAssignment/assign` endpoint. Confirm it is consentable for your app before relying on it, and use RBAC otherwise |
+| `TeamsUserConfiguration.Read.All` | Reading effective policy assignments | Without it the Read report notes the gap and continues |
+| `CallRecords.Read.All` | Call records (`/communications/callRecords`) | Needed only for CDR reports. Microsoft advises granting it only to trusted apps, because call records are sensitive |
+
+The app-only token is requested for `https://graph.microsoft.com/.default`, which means every
+permission above must be consented before it takes effect. The RBAC token is requested for the
+Teams resource (`48ac35b8-9aa8-4d74-927d-1f4a14a0b239/.default`), and the Teams Administrator role
+covers that path.
+
+### Who needs what
+
+| Sign-in | Identity | Roles and permissions | Features that need it |
+|---|---|---|---|
+| **Connect API** | SPN (client credentials) | Graph application permissions above, admin-consented | Users, numbers, policy assignment (Graph), CDR |
+| **Connect RBAC / Test RBAC** | SPN | Teams Administrator directory role | Policy Manager, DR inventory, civic addresses, alternate lines, Route Simulator writes |
+| **Interactive or device-code sign-in** | Your user account | Teams Administrator, or Teams Telephony Administrator for telephony-only writes. Trusted IP writes need Teams Administrator | Resource-account writes, which Microsoft does not allow under app-only auth |
+
+The user account does not need Graph application permissions. Those belong to the SPN. A user
+with only Teams Telephony Administrator gets "Denied" on Trusted IP writes, not on other telephony
+writes.
+
+### Dependencies at a glance
+
+- **RBAC depends on the role, not the permissions.** Connecting succeeds with the secret alone.
+  Without the Teams Administrator role, cmdlets connect and return empty results. An empty civic
+  address export is a role problem, not an auth problem.
+- **Graph writes depend on consent.** A permission that is added but not admin-consented fails with
+  a 403.
+- **Secret expiry breaks everything at once.** Both API and RBAC sign-in use the same secret.
+- **Administrative Unit scoped roles need more.** If the Teams Administrator role is scoped to an
+  Administrative Unit, add `RoleManagement.Read.Directory`, and for group cmdlets
+  `GroupMember.Read.All`, then re-consent and reconnect.
+
 ### Graph API (application permissions on the SPN)
 
 Endpoints used:
