@@ -1,0 +1,12 @@
+# Tenant and personal data - never commit
+TeamsVoice_Environments.csv
+TeamsVoice_Tenants.csv
+TeamsVoice_Settings.json
+TeamsVoice_Output/
+Catalogs/
+*.code-workspace
+
+# Local artifacts
+*.log
+*.tmp
+.staging_*/
