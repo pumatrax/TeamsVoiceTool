@@ -30,8 +30,8 @@ A PowerShell 7 WinForms toolkit for Microsoft Teams Enterprise Voice. It provisi
 
 **App registration (SPN), one per tenant**
 
-- Application permissions, with admin consent granted: `User.Read.All`, `TeamsTelephoneNumber.Read.All`, `TeamsTelephoneNumber.ReadWrite.All`, `TeamsUserConfiguration.Read.All`, and `CallRecords.Read.All` for CDR reports.
-- Directory role **Teams Administrator** assigned to the SPN. RBAC needs this role. Without it, cmdlets return empty results rather than errors.
+- Application permissions, with admin consent granted: `User.Read.All`, `Group.Read.All`, `TeamsTelephoneNumber.Read.All`, `TeamsTelephoneNumber.ReadWrite.All`, `TeamsPolicyUserAssign.ReadWrite.All`, `TeamsUserConfiguration.Read.All`, and `CallRecords.Read.All` for CDR reports.
+- Directory role **Teams Administrator**, assigned to the SPN at **Organization** scope (tenant-wide, not an Administrative Unit). RBAC needs this role. Without it, cmdlets return empty results rather than errors.
 - One client secret serves both Graph and RBAC. When it expires, both stop working.
 
 **Signed-in user**

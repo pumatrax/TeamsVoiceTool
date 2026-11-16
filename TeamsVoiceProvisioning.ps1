@@ -9050,14 +9050,15 @@ $txtSecret=New-Object System.Windows.Forms.TextBox; $txtSecret.Location=New-Obje
 $btnConnect=New-Object System.Windows.Forms.Button; $btnConnect.Location=New-Object System.Drawing.Point(334,42); $btnConnect.Size=New-Object System.Drawing.Size(96,26); $btnConnect.Text="Connect API"; Style-Button $btnConnect $clrBlue
 # Client credentials has no refresh token - the secret IS the renewal
 # mechanism. So auto-renew and discarding the secret are mutually exclusive,
-# and that trade belongs to the operator, not to a default.
+# and the operator can opt out of that trade with this checkbox.
 #
-# OFF (default) reproduces the original behaviour exactly: the secret is wiped
-# after the first mint and an expired token has to be re-entered by hand.
+# ON (default) keeps the secret in memory so the token renews itself. Unchecking
+# wipes the secret after the first mint, and an expired token has to be
+# re-entered by hand.
 $chkKeepSecret=New-Object System.Windows.Forms.CheckBox
 $chkKeepSecret.Location=New-Object System.Drawing.Point(556,45); $chkKeepSecret.Size=New-Object System.Drawing.Size(210,22)
 $chkKeepSecret.Text="Keep secret in memory (auto-renew)"
-$chkKeepSecret.Checked=$false
+$chkKeepSecret.Checked=$true
 
 $lblTokenState=New-Object System.Windows.Forms.Label;
 $lblTokenState.Location=New-Object System.Drawing.Point(772,46);
