@@ -2,7 +2,7 @@
 
 A PowerShell 7 WinForms toolkit for Microsoft Teams Enterprise Voice. It provisions and reads users and resource accounts, manages telephone lines and policies, and pulls call records, all from one window.
 
-**Package version: 1.1.0.** See [CHANGELOG.md](CHANGELOG.md) for release history.
+**Current version: 1.1.0.** See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ![Provisioning tab](Docs/screenshots/provisioning.png)
 

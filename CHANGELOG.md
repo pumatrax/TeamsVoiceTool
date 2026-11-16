@@ -4,6 +4,8 @@ All notable changes to TeamsVoiceTool are recorded here. The project uses [Seman
 
 ## Unreleased
 
+## 1.1.0
+
 - JSON Analyzer now distinguishes usage records from detailed call records, provides expandable JSON-field navigation, and suggests possible usage-to-call matches based on timestamps and identity evidence.
 - The SPN "Keep secret in memory (auto-renew)" option is on by default, so the API token renews itself without re-entering the secret. Untick it to keep the secret out of memory.
 - Permission docs: added `Group.Read.All`, `Organization.Read.All`, `RoleManagement.Read.Directory`, and `TeamsPolicyUserAssign.ReadWrite.All` to the SPN list, and the Teams Administrator role must be assigned at Organization scope.
