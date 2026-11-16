@@ -58,7 +58,7 @@ report that they need it rather than failing silently.
 
 ## 2. Requirements
 
-- **Windows PowerShell 5.1** or **PowerShell 7** (the UI is WinForms, so Windows only)
+- **Windows PowerShell 5.1** or **PowerShell 7** (the UI is WinForms, so Windows only). PowerShell 7 (`pwsh`) is recommended.
 - **An Entra ID app registration (SPN)** per tenant, with a client secret
 - **`MicrosoftTeams` PowerShell module** — only if you want the RBAC features
 - Network access to `login.microsoftonline.com` and `graph.microsoft.com`
