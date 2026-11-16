@@ -9,6 +9,10 @@ Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName Microsoft.VisualBasic
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
+# Semantic version. Bump MAJOR for breaking changes to saved files or workflow,
+# MINOR for new features, PATCH for fixes. Keep in step with git tags (vX.Y.Z).
+$script:AppVersion = '1.0.0'
+
 # Proxy, set once, process-wide, before anything else runs. Every Invoke-RestMethod
 # and Invoke-WebRequest below inherits it, which is why no -Proxy switch appears
 # anywhere in this file. Silent by design: on a network with no proxy this throws
@@ -9002,7 +9006,7 @@ $clrRed=[System.Drawing.Color]::FromArgb(168,0,0)
 function Style-Button { param($Btn,$Back,$Fore=[System.Drawing.Color]::White); $Btn.FlatStyle='Flat'; $Btn.BackColor=$Back; $Btn.ForeColor=$Fore; $Btn.FlatAppearance.BorderSize=0; $Btn.Font=New-Object System.Drawing.Font("Segoe UI",9,[System.Drawing.FontStyle]::Bold) }
 
 $form=New-Object System.Windows.Forms.Form
-$form.Text="Teams Voice Provisioning - Enterprise Voice Toolkit"
+$form.Text="TeamsVoiceTool v$script:AppVersion - Enterprise Voice Toolkit"
 $form.StartPosition="CenterScreen"; $form.BackColor=$clrLight
 $form.Font=New-Object System.Drawing.Font("Segoe UI",9);
 
