@@ -42,15 +42,16 @@ The [operator guide](Docs/TeamsVoiceProvisioning_Instructions.md#10-permissions-
 
 ## Getting started
 
-1. Clone the repo and open a PowerShell 7 window in the folder.
-2. Launch the tool:
+1. Extract `TeamsVoiceTool-v1.1.0.zip` to a writable folder, or clone the repo.
+2. Open a PowerShell 7 window in the extracted or cloned folder.
+3. Launch the tool:
 
    ```powershell
    pwsh -NoProfile -ExecutionPolicy Bypass -File .\TeamsVoiceProvisioning.ps1
    ```
 
-3. Click **Configuration** and add a tenant (label, tenant ID, client ID, and defaults). The tool stores no client secrets. Enter the secret in the SPN Secret box each session.
-4. Click **Connect API**, then **Connect RBAC** if you need phone number and policy features.
+4. Click **Configuration** and add a tenant (label, tenant ID, client ID, and defaults). The tool stores no client secrets. Enter the secret in the SPN Secret box each session.
+5. Click **Connect API**, then **Connect RBAC** if you need phone number and policy features.
 
 The [operator guide](Docs/TeamsVoiceProvisioning_Instructions.md) covers setup, each tab, required permissions, licensing, and troubleshooting.
 
