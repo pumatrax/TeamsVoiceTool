@@ -5,7 +5,7 @@ All notable changes to TeamsVoiceTool are recorded here. The project uses [Seman
 ## Unreleased
 
 - The SPN "Keep secret in memory (auto-renew)" option is on by default, so the API token renews itself without re-entering the secret. Untick it to keep the secret out of memory.
-- Permission docs: added `Group.Read.All` and `TeamsPolicyUserAssign.ReadWrite.All` to the SPN list, and the Teams Administrator role must be assigned at Organization scope.
+- Permission docs: added `Group.Read.All`, `Organization.Read.All`, `RoleManagement.Read.Directory`, and `TeamsPolicyUserAssign.ReadWrite.All` to the SPN list, and the Teams Administrator role must be assigned at Organization scope.
 
 ## 1.0.0
 

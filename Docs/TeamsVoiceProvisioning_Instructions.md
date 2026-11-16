@@ -515,6 +515,8 @@ doesn't exist, so a shared default catalog is possible.
 | `TeamsPolicyUserAssign.ReadWrite.All` | Assigning and unassigning user policies through Graph (`/admin/teams/policy/userAssignments/assign`) | Least-privileged application permission on the v1.0 endpoint |
 | `TeamsUserConfiguration.Read.All` | Reading effective policy assignments | Without it the Read report notes the gap and continues |
 | `Group.Read.All` | Group lookups for policy group assignment and licensing groups | Without it, group search falls back to pasting a group GUID |
+| `Organization.Read.All` | Reading tenant organization details and subscribed licenses | Read-only. Requested with the other tenant reads |
+| `RoleManagement.Read.Directory` | Reading directory role assignments, including Administrative Unit scoped Teams Administrator | Required for AU-scoped roles (see the 40301 note below) |
 | `CallRecords.Read.All` | Call records (`/communications/callRecords`) | Needed only for CDR reports. Microsoft advises granting it only to trusted apps, because call records are sensitive |
 
 The app-only token is requested for `https://graph.microsoft.com/.default`, which means every
