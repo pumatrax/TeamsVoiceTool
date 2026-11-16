@@ -63,4 +63,4 @@ The screenshots in this README use demo data (a fictional "Contoso Demo" tenant 
 
 ## License
 
-Add a license before making the repo public.
+Released under the [MIT License](LICENSE).
