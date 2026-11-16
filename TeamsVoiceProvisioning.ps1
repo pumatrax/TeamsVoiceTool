@@ -11,7 +11,7 @@ Add-Type -AssemblyName Microsoft.VisualBasic
 
 # Semantic version. Bump MAJOR for breaking changes to saved files or workflow,
 # MINOR for new features, PATCH for fixes. Keep in step with git tags (vX.Y.Z).
-$script:AppVersion = '1.0.0'
+$script:AppVersion = '1.1.0'
 
 # Proxy, set once, process-wide, before anything else runs. Every Invoke-RestMethod
 # and Invoke-WebRequest below inherits it, which is why no -Proxy switch appears

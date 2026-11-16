@@ -10,3 +10,4 @@ Catalogs/
 *.log
 *.tmp
 .staging_*/
+dist/
