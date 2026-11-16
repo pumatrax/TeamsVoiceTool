@@ -2319,6 +2319,13 @@ function Get-DeviceDetail {
 # REGION 5 - TREE CONSTRUCTION
 # ==============================================================================
 
+function Test-JAUsageRecord {
+    param($Record)
+    return ($null -ne (Get-JsonProperty $Record 'callType') -or
+            $null -ne (Get-JsonProperty $Record 'callerNumber') -or
+            $null -ne (Get-JsonProperty $Record 'calleeNumber'))
+}
+
 function Expand-CallRecord {
 <#
 .SYNOPSIS
@@ -2336,6 +2343,7 @@ function Expand-CallRecord {
     param([Parameter(Mandatory, ValueFromPipeline)]$CallRecord)
 
     process {
+        $isUsageRecord = Test-JAUsageRecord $CallRecord
         $sessions   = @(Get-JsonProperty $CallRecord 'sessions' @())
         $allStreams = New-Object System.Collections.ArrayList
         $failures   = New-Object System.Collections.ArrayList
@@ -2426,6 +2434,9 @@ function Expand-CallRecord {
         if ($start -and $end) {
             try { $dur = [math]::Round(([datetime]$end - [datetime]$start).TotalSeconds, 1) } catch { }
         }
+        if ($isUsageRecord -and $null -ne (Get-JsonProperty $CallRecord 'duration')) {
+            $dur = Get-JsonProperty $CallRecord 'duration'
+        }
 
         # Participant shape changed between API revisions; accept either.
         $participants = @(Get-JsonProperty $CallRecord 'participants_v2' @())
@@ -2438,22 +2449,50 @@ function Expand-CallRecord {
             $lbl = Get-JsonProperty $pt 'identity.user.displayName'
             if (-not $lbl) { $lbl = Get-JsonProperty $pt 'identity.phone.id' }
             if (-not $lbl) { $lbl = Get-JsonProperty $pt 'identity.user.userPrincipalName' }
+            if (-not $lbl) { $lbl = Get-JsonProperty $pt 'user.displayName' }
+            if (-not $lbl) { $lbl = Get-JsonProperty $pt 'phone.id' }
+            if (-not $lbl) { $lbl = Get-JsonProperty $pt 'user.id' }
             if (-not $lbl) { $lbl = Get-JsonProperty $pt 'id' }
-            if ($lbl) { $lbl }
+            if ($lbl) { $lbl } else { '(unknown)' }
         }
 
-        $verdict = if ($failures.Count -eq 0) { 'Success' }
+        $organizer = Get-JsonProperty $CallRecord 'organizer_v2'
+        $organizerLabel = if ($organizer) { Get-EndpointLabel $organizer }
+                          else {
+                              $legacy = Get-JsonProperty $CallRecord 'organizer'
+                              $label = Get-JsonProperty $legacy 'user.displayName'
+                              if (-not $label) { $label = Get-JsonProperty $legacy 'phone.id' }
+                              if (-not $label) { $label = Get-JsonProperty $legacy 'user.id' }
+                              if ($label) { $label } else { '(unknown)' }
+                          }
+
+        $successfulCall = Get-JsonProperty $CallRecord 'successfulCall'
+        $verdict = if ($isUsageRecord -and $successfulCall -is [bool]) {
+                       if ($successfulCall) { 'Success' } else { 'NotEstablished' }
+                   }
+                   elseif ($isUsageRecord -or -not $sessionNodes.Count) { 'Unknown' }
+                   elseif ($failures.Count -eq 0) { 'Success' }
                    elseif (@($sessionNodes | Where-Object Succeeded).Count -gt 0) { 'Partial' }
                    else { 'Failed' }
 
         [pscustomobject]@{
             NodeType        = 'Call'
+            IsUsageRecord   = $isUsageRecord
+            RecordKind      = if ($isUsageRecord) { Get-JAUsageKind $CallRecord } else { 'Call record' }
             Id              = Get-JsonProperty $CallRecord 'id'
-            Type            = Get-JsonProperty $CallRecord 'type'
+            Type            = if ($isUsageRecord) { Get-JsonProperty $CallRecord 'callType' } else { Get-JsonProperty $CallRecord 'type' }
+            CallerNumber    = Get-JsonProperty $CallRecord 'callerNumber'
+            CalleeNumber    = Get-JsonProperty $CallRecord 'calleeNumber'
+            UserDisplayName = Get-JsonProperty $CallRecord 'userDisplayName'
+            UserPrincipalName = Get-JsonProperty $CallRecord 'userPrincipalName'
+            CallId          = if ($isUsageRecord) {
+                                  $id = Get-JsonProperty $CallRecord 'callId'
+                                  if ($id) { $id } else { Get-JsonProperty $CallRecord 'correlationId' }
+                              } else { $null }
             StartDateTime   = $start
             EndDateTime     = $end
             DurationSeconds = $dur
-            Organizer       = Get-EndpointLabel (Get-JsonProperty $CallRecord 'organizer_v2')
+            Organizer       = $organizerLabel
             Modalities      = @(Get-JsonProperty $CallRecord 'modalities' @())
             ParticipantCount= $participants.Count
             Participants    = @($participantLabels)
@@ -2653,7 +2692,9 @@ function Show-CallRecordAnalyzer {
 
         foreach ($c in $calls) {
 
-            $colour = if ($c.Verdict -ne 'Success') { $ColFail }
+            $colour = if ($c.Verdict -eq 'Unknown') { $ColUnrated }
+                      elseif ($c.Verdict -eq 'NotEstablished') { $ColPoor }
+                      elseif ($c.Verdict -ne 'Success') { $ColFail }
                       elseif ($c.QualityVerdict -eq 'Poor') { $ColPoor }
                       elseif ($c.QualityVerdict -eq 'Unrated') { $ColUnrated }
                       else { $ColGood }
@@ -2665,7 +2706,9 @@ function Show-CallRecordAnalyzer {
             $cn = & $addNode $script:CraTree.Nodes $txt $colour $c
 
             if (-not $c.HasExpandedData) {
-                [void](& $addNode $cn.Nodes '(no sessions - CDR pull did not expand this record)' $ColUnrated $null)
+                $message = if ($c.IsUsageRecord) { '(usage record - session and media details unavailable)' }
+                           else { '(no sessions - CDR pull did not expand this record)' }
+                [void](& $addNode $cn.Nodes $message $ColUnrated $null)
                 continue
             }
 
@@ -3569,6 +3612,7 @@ function New-DiagnosticsTabPage {
     # ---------- split: tree | (verdict / flow / raw) -------------------------
     $split = New-Object System.Windows.Forms.SplitContainer
     $split.Dock = 'Fill'; $split.Orientation = 'Vertical'; $split.SplitterDistance = 520
+    $split.IsSplitterFixed = $false
 
     $tree = New-Object System.Windows.Forms.TreeView
     $tree.Dock = 'Fill'; $tree.Font = $Mono; $tree.HideSelection = $false
@@ -3616,14 +3660,24 @@ function New-DiagnosticsTabPage {
 
     # Everything a handler needs, reachable after this function returns.
     $script:JA.Ctl = @{
-        Tree=$tree; Verdict=$rtbVerdict; Flow=$rtbFlow; Raw=$txtRaw; Path=$lblPath; Page=$page
+        Tree=$tree; Verdict=$rtbVerdict; Flow=$rtbFlow; Raw=$txtRaw; RawGroup=$grpRaw; FlowGroup=$grpFlow; Path=$lblPath; Page=$page
+        Split=$split; LayoutInitialized=$false
         ColCrit=$ColCrit; ColWarn=$ColWarn; ColOk=$ColOk; ColInfo=$ColInfo; ColKey=$ColKey
     }
 
     # ---------- handlers -----------------------------------------------------
+    $page.Add_Enter({ Initialize-JALayout })
+    $page.Add_VisibleChanged({ Initialize-JALayout })
+    $split.Add_SizeChanged({ Initialize-JALayout })
+
     $btnFile.Add_Click({
         $dlg = New-Object System.Windows.Forms.OpenFileDialog
         $dlg.Filter = 'callRecord JSON (*.json)|*.json|All files (*.*)|*.*'
+        try { $dlg.InitialDirectory = Get-JARawJsonDirectory }
+        catch {
+            [System.Windows.Forms.MessageBox]::Show("Cannot open RawJSON folder:`n`n$($_.Exception.Message)",'JSON Analyzer','OK','Error') | Out-Null
+            return
+        }
         if ($dlg.ShowDialog() -ne 'OK') { return }
         Invoke-JALoad -Path $dlg.FileName
     })
@@ -3631,6 +3685,11 @@ function New-DiagnosticsTabPage {
     $btnFolder.Add_Click({
         $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
         $dlg.Description = 'Select a RawJSON folder'
+        try { $dlg.SelectedPath = Get-JARawJsonDirectory }
+        catch {
+            [System.Windows.Forms.MessageBox]::Show("Cannot open RawJSON folder:`n`n$($_.Exception.Message)",'JSON Analyzer','OK','Error') | Out-Null
+            return
+        }
         if ($dlg.ShowDialog() -ne 'OK') { return }
         Invoke-JALoad -Path $dlg.SelectedPath -Recurse
     })
@@ -3643,13 +3702,181 @@ function New-DiagnosticsTabPage {
     $btnFleet.Add_Click({
         $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
         $dlg.Description = 'Correlate poor streams across a folder of call records'
+        try { $dlg.SelectedPath = Get-JARawJsonDirectory }
+        catch {
+            [System.Windows.Forms.MessageBox]::Show("Cannot open RawJSON folder:`n`n$($_.Exception.Message)",'JSON Analyzer','OK','Error') | Out-Null
+            return
+        }
         if ($dlg.ShowDialog() -ne 'OK') { return }
         Show-JAFleet -Path $dlg.SelectedPath
     })
 
+    $tree.Add_BeforeExpand({ param($s,$e) Expand-JAJsonNode -Node $e.Node })
     $tree.Add_AfterSelect({ param($s,$e) Update-JASelection -Node $e.Node })
 
     $page
+}
+
+function Initialize-JALayout {
+    $c = $script:JA.Ctl
+    if ($c.LayoutInitialized -or -not $c.Page.Visible -or $c.Split.Width -lt 300 -or $c.Split.Height -lt 200) { return }
+    $c.Split.SplitterDistance = [int]($c.Split.Width * 0.46)
+    $c.LayoutInitialized = $true
+}
+
+function Get-JARawJsonDirectory {
+    $path = Join-Path (Join-Path (Get-OutputRoot) 'CDR') 'RawJSON'
+    if (-not (Test-Path -LiteralPath $path -PathType Container)) {
+        [void](New-Item -ItemType Directory -Path $path -Force -ErrorAction Stop)
+    }
+    return $path
+}
+
+function Get-JAUsageKind {
+    param($Record)
+    $type = Get-JsonProperty $Record '@odata.type' ''
+    $source = Get-JsonProperty $Record '_SourceFile' ''
+    if ($type -match 'directRoutingLogRow' -or
+        $Record.PSObject.Properties['successfulCall'] -or
+        $Record.PSObject.Properties['correlationId'] -or
+        [System.IO.Path]::GetFileName($source) -like 'DirectRouting-*') { return 'Direct Routing' }
+    if ($type -match 'pstnCallLogRow' -or
+        $Record.PSObject.Properties['callId'] -or
+        $Record.PSObject.Properties['charge'] -or
+        [System.IO.Path]::GetFileName($source) -like 'Pstn-*') { return 'PSTN' }
+    return 'Usage'
+}
+
+function New-JAJsonNode {
+    param([string]$Name, $Value)
+
+    $text = $Name
+    $expandable = $false
+    if ($Value -is [array]) {
+        $text += " [$($Value.Count)]"
+        $expandable = $Value.Count -gt 0
+    }
+    elseif ($Value -is [pscustomobject]) {
+        $expandable = @($Value.PSObject.Properties).Count -gt 0
+    }
+    else {
+        $display = if ($null -eq $Value) { 'null' } else { ConvertTo-Json -InputObject $Value -Compress -Depth 2 }
+        if ($display.Length -gt 100) { $display = $display.Substring(0, 100) + '...' }
+        $text += ": $display"
+    }
+    $node = New-Object System.Windows.Forms.TreeNode($text)
+    $node.Tag = [pscustomobject]@{ Kind='Json'; Raw=$Value; Pending=$expandable }
+    if ($expandable) { [void]$node.Nodes.Add((New-Object System.Windows.Forms.TreeNode('Loading...'))) }
+    return $node
+}
+
+function Expand-JAJsonNode {
+    param($Node)
+    $tag = $Node.Tag
+    if (-not $tag -or $tag.Kind -ne 'Json' -or -not $tag.Pending) { return }
+    $Node.Nodes.Clear()
+    if ($tag.Raw -is [array]) {
+        for ($i = 0; $i -lt $tag.Raw.Count; $i++) {
+            [void]$Node.Nodes.Add((New-JAJsonNode -Name "[$i]" -Value $tag.Raw[$i]))
+        }
+    }
+    else {
+        foreach ($property in $tag.Raw.PSObject.Properties) {
+            [void]$Node.Nodes.Add((New-JAJsonNode -Name $property.Name -Value $property.Value))
+        }
+    }
+    $tag.Pending = $false
+}
+
+function Add-JAJsonFields {
+    param($Node, $Value)
+    [void]$Node.Nodes.Add((New-JAJsonNode -Name 'JSON fields' -Value $Value))
+}
+
+function Get-JADisplayRecord {
+    param($Record)
+    if (-not $Record.PSObject.Properties['_SourceFile']) { return $Record }
+    $properties = @($Record.PSObject.Properties.Name | Where-Object { $_ -ne '_SourceFile' })
+    return ($Record | Select-Object -Property $properties)
+}
+
+function Get-JATime {
+    param($Record, [string]$Property)
+    $value = Get-JsonProperty $Record $Property
+    if ($value -is [datetimeoffset]) { return $value.ToUniversalTime() }
+    if ($value -is [datetime]) { return ([datetimeoffset]$value).ToUniversalTime() }
+    $parsed = [datetimeoffset]::MinValue
+    if ($null -ne $value -and [datetimeoffset]::TryParse([string]$value, [ref]$parsed)) {
+        return $parsed.ToUniversalTime()
+    }
+    return $null
+}
+
+function Get-JAMatchEvidence {
+    param($Usage, $Detail)
+
+    $identities = New-Object System.Collections.ArrayList
+    foreach ($item in @((Get-JsonProperty $Detail 'organizer'), (Get-JsonProperty $Detail 'organizer_v2'))) {
+        if ($item) { [void]$identities.Add($item) }
+    }
+    foreach ($item in @(Get-JsonProperty $Detail 'participants' @()) + @(Get-JsonProperty $Detail 'participants_v2' @())) {
+        if ($item) { [void]$identities.Add($item) }
+    }
+    foreach ($session in @(Get-JsonProperty $Detail 'sessions' @())) {
+        foreach ($leg in @($session) + @(Get-JsonProperty $session 'segments' @())) {
+            foreach ($side in @('caller','callee')) {
+                $endpoint = Get-JsonProperty $leg $side
+                if ($endpoint) { [void]$identities.Add($endpoint) }
+            }
+        }
+    }
+
+    $users = @(); $phones = @()
+    foreach ($item in $identities) {
+        foreach ($path in @('user.id','identity.user.id','associatedIdentity.id')) {
+            $value = Get-JsonProperty $item $path
+            if ($value) { $users += [string]$value }
+        }
+        foreach ($path in @('phone.id','identity.phone.id','associatedIdentity.id','id')) {
+            $value = Get-JsonProperty $item $path
+            if ($value -and [string]$value -match '^\+?\d+$') { $phones += [string]$value }
+        }
+    }
+    $userId = Get-JsonProperty $Usage 'userId'
+    $numbers = @((Get-JsonProperty $Usage 'callerNumber'), (Get-JsonProperty $Usage 'calleeNumber')) | Where-Object { $_ }
+    $userEvidence = if ($userId -and $users.Count) {
+        if ([string]$userId -in $users) { 'user ID matches' } else { 'user ID differs' }
+    } else { 'user ID unavailable' }
+    $numberEvidence = if (@($numbers).Count -and $phones.Count) {
+        if (@($numbers | Where-Object { [string]$_ -in $phones }).Count) { 'number matches' } else { 'number differs' }
+    } else { 'number unavailable' }
+    return "$userEvidence; $numberEvidence"
+}
+
+function Get-JAPossibleMatches {
+    param($Record, $Index)
+    $start = Get-JATime $Record 'startDateTime'
+    $end = Get-JATime $Record 'endDateTime'
+    if ($null -eq $start -or $null -eq $end) { return }
+    $isUsage = Test-JAUsageRecord $Record
+    $second = [long][math]::Floor($start.UtcTicks / [double][timespan]::TicksPerSecond)
+    foreach ($offset in -1..1) {
+        $key = "{0}:{1}" -f (-not $isUsage), ($second + $offset)
+        foreach ($candidate in @($Index[$key])) {
+            if ($null -eq $candidate) { continue }
+            $source = Get-JsonProperty $Record '_SourceFile'
+            $otherSource = Get-JsonProperty $candidate.Record '_SourceFile'
+            if ($source -and $otherSource -and (Split-Path -Parent $source) -ne (Split-Path -Parent $otherSource)) { continue }
+            if ([math]::Abs(($start - $candidate.Start).TotalSeconds) -gt 1 -or
+                [math]::Abs(($end - $candidate.End).TotalSeconds) -gt 1) { continue }
+            $usage = if ($isUsage) { $Record } else { $candidate.Record }
+            $detail = if ($isUsage) { $candidate.Record } else { $Record }
+            [pscustomobject]@{
+                Record = $candidate.Record
+                Evidence = Get-JAMatchEvidence $usage $detail
+            }
+        }
+    }
 }
 
 function Invoke-JALoad {
@@ -3674,7 +3901,8 @@ function Invoke-JALoad {
             # PS 5.1 writes a BOM; ConvertFrom-Json tolerates it but a leading
             # U+FEFF breaks strict parsers and naive comparisons downstream.
             if ($t -and [int][char]$t[0] -eq 0xFEFF) { $t = $t.Substring(1) }
-            try { $o = $t | ConvertFrom-Json } catch { continue }
+            try { $o = $t | ConvertFrom-Json -ErrorAction Stop }
+            catch { throw "Invalid JSON in '$($f.FullName)': $($_.Exception.Message)" }
             $items = if ($o -is [array]) { $o } elseif ($o.PSObject.Properties['value']) { @($o.value) } else { @($o) }
             foreach ($i in $items) {
                 if ($i -and $i.PSObject.Properties['id']) {
@@ -3691,8 +3919,18 @@ function Invoke-JALoad {
             return
         }
 
+        $candidates = @($recs)
+        if (-not (Get-Item -LiteralPath $Path).PSIsContainer) {
+            $parent = Split-Path -Parent (Get-Item -LiteralPath $Path).FullName
+            foreach ($pattern in @('callRecord-*.json','Pstn-*.json','DirectRouting-*.json')) {
+                foreach ($sibling in @(Get-ChildItem -LiteralPath $parent -Filter $pattern -File)) {
+                    if ($sibling.FullName -eq (Get-Item -LiteralPath $Path).FullName) { continue }
+                    $candidates += @(Import-CallRecord -Path $sibling.FullName)
+                }
+            }
+        }
         $script:JA.Path = $Path
-        Invoke-JARender -Records @($recs) -Label $Path
+        Invoke-JARender -Records @($recs) -Candidates $candidates -Label $Path
     }
     catch {
         [System.Windows.Forms.MessageBox]::Show("Load failed:`n`n$($_.Exception.Message)",'JSON Analyzer','OK','Error') | Out-Null
@@ -3706,11 +3944,23 @@ function Invoke-JARender {
     Build the tree from loaded records and show the first one's summary.
 #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)]$Records, [string]$Label)
+    param([Parameter(Mandatory)]$Records, $Candidates = $Records, [string]$Label)
 
     $c = $script:JA.Ctl
     $script:JA.Records  = @($Records)
     $script:JA.Expanded = @($Records | Expand-CallRecord)
+    $script:JA.Current = $null
+
+    $matchIndex = @{}
+    foreach ($candidate in @($Candidates)) {
+        $start = Get-JATime $candidate 'startDateTime'
+        $end = Get-JATime $candidate 'endDateTime'
+        if ($null -eq $start -or $null -eq $end) { continue }
+        $second = [long][math]::Floor($start.UtcTicks / [double][timespan]::TicksPerSecond)
+        $key = "{0}:{1}" -f (Test-JAUsageRecord $candidate), $second
+        if (-not $matchIndex.ContainsKey($key)) { $matchIndex[$key] = New-Object System.Collections.ArrayList }
+        [void]$matchIndex[$key].Add([pscustomobject]@{ Record=$candidate; Start=$start; End=$end })
+    }
 
     $c.Tree.BeginUpdate()
     $c.Tree.Nodes.Clear()
@@ -3719,14 +3969,38 @@ function Invoke-JARender {
         $x   = $script:JA.Expanded[$i]
         $raw = $script:JA.Records[$i]
 
-        $head = "callRecord  id=$($x.Id)  type=$($x.Type)"
+        $head = if ($x.IsUsageRecord) { "$($x.RecordKind) usage record  id=$($x.Id)  type=$($x.Type)" }
+                else { "callRecord  id=$($x.Id)  type=$($x.Type)" }
         $n = New-Object System.Windows.Forms.TreeNode($head)
-        $n.Tag = [pscustomobject]@{ Kind='Call'; Exp=$x; Raw=$raw }
-        $n.ForeColor = if ($x.Verdict -ne 'Success') { $c.ColCrit }
+        $displayRaw = Get-JADisplayRecord $raw
+        $n.Tag = [pscustomobject]@{ Kind='Call'; Exp=$x; Raw=$displayRaw }
+        $n.ForeColor = if ($x.Verdict -eq 'Unknown') { $c.ColInfo }
+                       elseif ($x.Verdict -eq 'NotEstablished') { $c.ColWarn }
+                       elseif ($x.Verdict -ne 'Success') { $c.ColCrit }
                        elseif ($x.QualityVerdict -eq 'Poor') { $c.ColWarn } else { $c.ColOk }
 
+        foreach ($match in @(Get-JAPossibleMatches $raw $matchIndex)) {
+            $related = Expand-CallRecord $match.Record
+            $matchNode = New-Object System.Windows.Forms.TreeNode("Possible match: $($related.Id) (times within 1s; $($match.Evidence))")
+            $matchNode.ForeColor = $c.ColInfo
+            $matchRaw = Get-JADisplayRecord $match.Record
+            $matchNode.Tag = [pscustomobject]@{ Kind='Call'; Exp=$related; Raw=$matchRaw }
+            Add-JAJsonFields $matchNode $matchRaw
+            [void]$n.Nodes.Add($matchNode)
+        }
+
+        Add-JAJsonFields $n $displayRaw
+
+        if ($x.IsUsageRecord) {
+            [void]$c.Tree.Nodes.Add($n)
+            continue
+        }
+
         $o = New-Object System.Windows.Forms.TreeNode("organizer: $($x.Organizer)")
-        $o.Tag = [pscustomobject]@{ Kind='Raw'; Raw=(Get-JsonProperty $raw 'organizer_v2') }
+        $organizerRaw = Get-JsonProperty $raw 'organizer_v2'
+        if ($null -eq $organizerRaw) { $organizerRaw = Get-JsonProperty $raw 'organizer' }
+        $o.Tag = [pscustomobject]@{ Kind='Raw'; Raw=$organizerRaw }
+        if ($null -ne $organizerRaw) { Add-JAJsonFields $o $organizerRaw }
         [void]$n.Nodes.Add($o)
 
         $pn = New-Object System.Windows.Forms.TreeNode("participants ($($x.ParticipantCount))")
@@ -3735,9 +4009,13 @@ function Invoke-JARender {
         # Grouping nodes get the underlying array as their payload rather than
         # nothing - clicking one and getting a blank pane reads as a failure.
         $pn.Tag = [pscustomobject]@{ Kind='Raw'; Raw=$rawParts }
+        Add-JAJsonFields $pn $rawParts
         for ($p = 0; $p -lt @($x.Participants).Count; $p++) {
             $pl = New-Object System.Windows.Forms.TreeNode("participant: $(@($x.Participants)[$p])")
-            if ($p -lt $rawParts.Count) { $pl.Tag = [pscustomobject]@{ Kind='Raw'; Raw=$rawParts[$p] } }
+            if ($p -lt $rawParts.Count) {
+                $pl.Tag = [pscustomobject]@{ Kind='Raw'; Raw=$rawParts[$p] }
+                Add-JAJsonFields $pl $rawParts[$p]
+            }
             [void]$pn.Nodes.Add($pl)
         }
         [void]$n.Nodes.Add($pn)
@@ -3754,6 +4032,7 @@ function Invoke-JARender {
             if (-not $s.Succeeded) { $sTxt += "   FAILED [$($s.FailureStage): $($s.FailureReason)]" }
             $snode = New-Object System.Windows.Forms.TreeNode($sTxt)
             $snode.Tag = [pscustomobject]@{ Kind='Raw'; Raw=$sRaw }
+            Add-JAJsonFields $snode $sRaw
             $snode.ForeColor = if ($s.Succeeded) { $c.ColOk } else { $c.ColCrit }
 
             $rawSegs = @(Get-JsonProperty $sRaw 'segments' @())
@@ -3765,6 +4044,7 @@ function Invoke-JARender {
                 if (-not $g.Succeeded) { $gTxt += "   FAILED [$($g.FailureStage): $($g.FailureReason)]" }
                 $gnode = New-Object System.Windows.Forms.TreeNode($gTxt)
                 $gnode.Tag = [pscustomobject]@{ Kind='Raw'; Raw=$gRaw }
+                Add-JAJsonFields $gnode $gRaw
                 $gnode.ForeColor = if ($g.Succeeded) { $c.ColOk } else { $c.ColCrit }
 
                 $rawMedia = @(Get-JsonProperty $gRaw 'media' @())
@@ -3774,6 +4054,7 @@ function Invoke-JARender {
 
                     $mnode = New-Object System.Windows.Forms.TreeNode("media[$($m.Label)]  streams=$(@($m.Streams).Count)")
                     $mnode.Tag = [pscustomobject]@{ Kind='Raw'; Raw=$mRaw }
+                    Add-JAJsonFields $mnode $mRaw
                     $mnode.ForeColor = if ($m.PoorStreams) { $c.ColWarn } else { $c.ColOk }
 
                     $rawStreams = @(Get-JsonProperty $mRaw 'streams' @())
@@ -3785,7 +4066,10 @@ function Invoke-JARender {
                         $cd = if ($m.Label -match 'video|screen') { $t.VideoCodec } else { $t.AudioCodec }
                         $cdTxt = if ($cd -and $cd -ne 'unknown') { "  codec=$cd" } else { '' }
                         $tnode = New-Object System.Windows.Forms.TreeNode("stream $($ti+1)  dir=$($t.Direction)$cdTxt  [$($t.Verdict)]")
-                        if ($ti -lt $rawStreams.Count) { $tnode.Tag = [pscustomobject]@{ Kind='Raw'; Raw=$rawStreams[$ti] } }
+                        if ($ti -lt $rawStreams.Count) {
+                            $tnode.Tag = [pscustomobject]@{ Kind='Raw'; Raw=$rawStreams[$ti] }
+                            Add-JAJsonFields $tnode $rawStreams[$ti]
+                        }
                         $tnode.ForeColor = switch ($t.Verdict) { 'Poor' { $c.ColWarn } 'Unrated' { $c.ColInfo } default { $c.ColOk } }
                         [void]$mnode.Nodes.Add($tnode)
                     }
@@ -3834,9 +4118,11 @@ function Update-JASelection {
     # A blank pane is also ambiguous - it reads as "retrieval failed" when the
     # node simply has no payload of its own. Say which it is.
     $tag = $Node.Tag
-    if ($null -ne $tag -and $null -ne $tag.Raw) {
+    $c.RawGroup.Text = "Selected Node (raw JSON): $($Node.Text)"
+    if ($null -ne $tag -and ($null -ne $tag.Raw -or $tag.Kind -eq 'Json')) {
         try {
-            $json = $tag.Raw | ConvertTo-Json -Depth 20 -ErrorAction Stop
+            $json = if ($null -eq $tag.Raw) { 'null' }
+                    else { ConvertTo-Json -InputObject $tag.Raw -Depth 100 -ErrorAction Stop }
             if ([string]::IsNullOrWhiteSpace($json)) { $json = '(node serialized to nothing)' }
             # Normalise line endings - a TextBox renders bare LF as one long line.
             $c.Raw.Text = ($json -replace "`r`n", "`n") -replace "`n", "`r`n"
@@ -3856,38 +4142,60 @@ function Update-JASelection {
 
     # Verdict and flow follow the CALL the node belongs to, so they stay
     # meaningful while drilling into a stream.
-    $root = $Node; while ($root.Parent) { $root = $root.Parent }
+    $root = $Node
+    while ($root -and -not ($root.Tag -and $root.Tag.Kind -eq 'Call')) { $root = $root.Parent }
     if (-not ($root.Tag -and $root.Tag.Kind -eq 'Call')) { return }
     $x = $root.Tag.Exp
-    if ($script:JA.Current -eq $x.Id) { return }
-    $script:JA.Current = $x.Id
+    if ([object]::ReferenceEquals($script:JA.Current, $root)) { return }
+    $script:JA.Current = $root
 
     # ----- Verdict -----------------------------------------------------------
     $c.Verdict.Clear()
-    $vCol = if ($x.Verdict -eq 'Success') { $c.ColOk } elseif ($x.Verdict -eq 'Partial') { $c.ColWarn } else { $c.ColCrit }
-    Write-JALine $c.Verdict "VERDICT: $($x.Verdict.ToUpper())" $vCol -Bold
+    $vCol = if ($x.Verdict -eq 'Unknown') { $c.ColInfo } elseif ($x.Verdict -eq 'Success') { $c.ColOk } elseif ($x.Verdict -in @('Partial','NotEstablished')) { $c.ColWarn } else { $c.ColCrit }
+    if ($x.IsUsageRecord) {
+        Write-JALine $c.Verdict "$($x.RecordKind.ToUpper()) CALL STATISTICS" $c.ColKey -Bold
+    }
+    else {
+        Write-JALine $c.Verdict "VERDICT: $($x.Verdict.ToUpper())" $vCol -Bold
+    }
 
     $dur = if ($null -ne $x.DurationSeconds) { "  ($($x.DurationSeconds) s)" } else { '' }
-    Write-JALine $c.Verdict ("Type       : {0}   Modalities: {1}" -f $x.Type, (@($x.Modalities) -join ',')) $null
+    if ($x.IsUsageRecord) { Write-JALine $c.Verdict ("Type       : {0}" -f $x.Type) $null }
+    else { Write-JALine $c.Verdict ("Type       : {0}   Modalities: {1}" -f $x.Type, (@($x.Modalities) -join ',')) $null }
     Write-JALine $c.Verdict ("Start/End  : {0}  ->  {1}{2}" -f $x.StartDateTime, $x.EndDateTime, $dur) $null
-    Write-JALine $c.Verdict ("Organizer  : {0}   Participants: {1}" -f $x.Organizer, $x.ParticipantCount) $null
+    if ($x.IsUsageRecord) {
+        Write-JALine $c.Verdict ("User       : {0}  {1}" -f $x.UserDisplayName, $x.UserPrincipalName) $null
+        Write-JALine $c.Verdict ("Call ID    : {0}" -f $x.CallId) $null
+        if ($x.Verdict -ne 'Unknown') {
+            $outcome = if ($x.Verdict -eq 'Success') { 'established' } else { 'not established' }
+            Write-JALine $c.Verdict ("Outcome    : {0} (reported by Direct Routing)." -f $outcome) $vCol
+        }
+    }
+    else {
+        Write-JALine $c.Verdict ("Organizer  : {0}   Participants: {1}" -f $x.Organizer, $x.ParticipantCount) $null
+    }
 
     # Worst reading across every stream, so one bad leg is not hidden by averages.
     $rated = @($x.AllStreams | Where-Object Verdict -ne 'Unrated')
-    if ($rated.Count) {
-        $wj = ($rated | Where-Object { $null -ne $_.AvgJitterMs }    | Measure-Object AvgJitterMs      -Maximum).Maximum
-        $wl = ($rated | Where-Object { $null -ne $_.AvgPacketLossRate } | Measure-Object AvgPacketLossRate -Maximum).Maximum
-        $wr = ($rated | Where-Object { $null -ne $_.AvgRoundTripMs } | Measure-Object AvgRoundTripMs  -Maximum).Maximum
-        $f = { param($v,$fmt) if ($null -eq $v) { '-' } else { $fmt -f $v } }
-        Write-JALine $c.Verdict ("Worst media: jitter={0}  loss={1}  rtt={2}" -f (& $f $wj '{0:N1}ms'), (& $f $wl '{0:P0}'), (& $f $wr '{0:N0}ms')) $null
-    }
-    else {
-        Write-JALine $c.Verdict 'Worst media: no rated streams - cannot be assessed (not the same as good).' $c.ColInfo
+    if (-not $x.IsUsageRecord) {
+        if ($rated.Count) {
+            $wj = ($rated | Where-Object { $null -ne $_.AvgJitterMs }    | Measure-Object AvgJitterMs      -Maximum).Maximum
+            $wl = ($rated | Where-Object { $null -ne $_.AvgPacketLossRate } | Measure-Object AvgPacketLossRate -Maximum).Maximum
+            $wr = ($rated | Where-Object { $null -ne $_.AvgRoundTripMs } | Measure-Object AvgRoundTripMs  -Maximum).Maximum
+            $f = { param($v,$fmt) if ($null -eq $v) { '-' } else { $fmt -f $v } }
+            Write-JALine $c.Verdict ("Worst media: jitter={0}  loss={1}  rtt={2}" -f (& $f $wj '{0:N1}ms'), (& $f $wl '{0:P0}'), (& $f $wr '{0:N0}ms')) $null
+        }
+        else {
+            Write-JALine $c.Verdict 'Worst media: no rated streams - cannot be assessed (not the same as good).' $c.ColInfo
+        }
     }
 
     # Diagnostic findings, highest severity first.
     $findings = @()
-    try { $findings = @(Get-CallDiagnosis -CallRecord $root.Tag.Raw -MinimumConfidence Medium) } catch { }
+    if (-not $x.IsUsageRecord) {
+        try { $findings = @(Get-CallDiagnosis -CallRecord $root.Tag.Raw -MinimumConfidence Medium) }
+        catch { Write-JALine $c.Verdict ("Diagnosis failed: {0}" -f $_.Exception.Message) $c.ColCrit }
+    }
     $act = @($findings | Where-Object Severity -ne 'Info')
     if ($act.Count) {
         Write-JALine $c.Verdict '' $null
@@ -3896,13 +4204,30 @@ function Update-JASelection {
             Write-JALine $c.Verdict ("{0,-9}: {1} - {2}" -f $fd.Severity, $fd.Title, $fd.Evidence) $fc
         }
     }
-    elseif ($findings.Count) {
+    elseif ($findings.Count -and $rated.Count) {
         Write-JALine $c.Verdict '' $null
         Write-JALine $c.Verdict 'Quality    : no warnings above threshold.' $c.ColOk
     }
 
     # ----- Call flow ---------------------------------------------------------
     $c.Flow.Clear()
+    if ($x.IsUsageRecord) {
+        $c.FlowGroup.Text = 'Call Statistics'
+        $caller = if ($x.CallerNumber) { $x.CallerNumber } else { '(not reported)' }
+        $callee = if ($x.CalleeNumber) { $x.CalleeNumber } else { '(not reported)' }
+        Write-JALine $c.Flow ("CALLER {0}  ==>  CALLEE {1}" -f $caller, $callee) $c.ColKey -Bold
+        foreach ($property in $root.Tag.Raw.PSObject.Properties) {
+            if ($property.Name -like '@odata.*' -or $null -eq $property.Value -or
+                $property.Value -is [array] -or $property.Value -is [pscustomobject]) { continue }
+            Write-JALine $c.Flow ("{0,-28}: {1}" -f $property.Name, $property.Value) $null
+        }
+    }
+    else {
+        $c.FlowGroup.Text = 'Call Flow'
+        if (-not $x.HasExpandedData) {
+            Write-JALine $c.Flow 'No session detail available in this record.' $c.ColInfo
+        }
+    }
     $si = 0
     foreach ($s in @($x.Sessions)) {
         $si++

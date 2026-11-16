@@ -348,6 +348,24 @@ a record when its `version` increments, for up to 60 minutes after first sightin
 
 The engine runs in a background runspace, so the UI stays responsive. Closing the form stops it.
 
+### JSON Analyzer
+
+The JSON Analyzer opens files and folders starting in `TeamsVoice_Output\CDR\RawJSON`.
+Calling Plan and Direct Routing usage records show the caller, callee, user, call type,
+and duration when available. Direct Routing records also report whether the call was
+established. Usage records do not contain session or media quality details; use
+**Full callRecords detail** for that analysis.
+The left tree provides session, segment, media and stream navigation for full
+call records. Expand **JSON fields** on a record or section to inspect its fields,
+including nested endpoints, networks, devices and arrays. Select any node to see
+its JSON value in the bottom pane; possible matches can also be expanded this way.
+Drag the vertical divider to resize the tree and the right-hand panes.
+Possible matches between usage and full call records appear in the tree when both
+start and end times are within one second. The analyzer also reports whether the
+user ID and a phone number match, when available. These are suggestions, not
+confirmed links. Loading a file searches its folder for other exported call JSON;
+loading a folder matches records within each individual export folder.
+
 ---
 
 ## 8. The Catalogs tab
